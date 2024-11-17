@@ -31,7 +31,10 @@ class ShellEmulator:
 
     def write_to_the_log_file(self, text):
         with open(self.log_file, mode='a') as file:
-            file.write(text+"\n")
+            try:
+                file.write(text+"\n")
+            except:
+                pass
 
     def clear_log_file(self):
         with open(self.log_file, mode='w') as file:
@@ -59,7 +62,7 @@ class ShellEmulator:
             self.current_path = new_path
             return f"Changed directory to {new_path}"
         else:
-            return "No such file or directory."
+            pass
 
     def remove_directory(self, dirname):
         path_to_remove = os.path.join(self.current_path, dirname)
