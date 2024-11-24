@@ -151,11 +151,13 @@ ZIP-файл, содержащий нужные файлы и директори
 
 
 ### Скриншоты запуска
-ДОПИСАТЬ
+![echo](https://github.com/user-attachments/assets/1fdee459-ba3b-41ce-887b-f9890438b5b7)
+![ls](https://github.com/user-attachments/assets/264480a2-efdf-4ccc-af01-dfbb20dcc247)
 
 ---
 
 
 ### Тестирование
-ДОПИСАТЬ
+![tests](https://github.com/user-attachments/assets/9328d675-d519-44f0-b2d2-b539fa902a95)
+
 
