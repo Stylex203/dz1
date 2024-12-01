@@ -85,7 +85,7 @@ class ShellEmulator:
             return str(e)
 
     def current_date(self):
-        return datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        return datetime.now().strftime("%Y-%m-%d, %H:%M:%S")
 
     def echo(self, text):
         self.text = text
@@ -111,48 +111,36 @@ class ShellEmulator:
 
         cmd = parts[0]
         if cmd == "ls":
-            self.write_to_the_log_file(f"{self.current_date()} {self.list_directory()}")
             return self.list_directory()
         elif cmd == "cd":
             if len(parts) < 2:
-                self.write_to_the_log_file(f"{self.current_date()} cd: missing argument")
                 return "cd: missing argument"
-            self.write_to_the_log_file(f"{self.current_date()} {self.change_directory(parts[1])}")
             return self.change_directory(parts[1])
         elif cmd == "date":
-            self.write_to_the_log_file(f"{self.current_date()} {self.current_date()}")
             return self.current_date()
         elif cmd == "help":
-            self.write_to_the_log_file(f"{self.current_date()} {self.show_help()}")
             return self.show_help()
         elif cmd == "echo":
             if len(parts) < 2:
-                self.write_to_the_log_file(f"{self.current_date()} echo: missing text")
                 return "echo: missing text"
-            self.write_to_the_log_file(f"{self.current_date()} {self.echo(full_text[5:])}")
             return self.echo(full_text[5:])
         elif cmd == "chown":
             if len(parts) < 3:
-                self.write_to_the_log_file(f"{self.current_date()} chown: missing arguments")
                 return "chown: missing arguments"
             filename = parts[1]
             new_owner = parts[2]
-            self.write_to_the_log_file(f"{self.current_date()} {self.change_owner(filename, new_owner)}")
             return self.change_owner(filename, new_owner)
         elif cmd == "exit":
-            self.write_to_the_log_file(f"{self.current_date()} Exiting...")
             return "Exiting..."
         else:
-            self.write_to_the_log_file(f"{self.current_date()} {cmd}: command not found")
             return f"{cmd}: command not found"
 
     def start(self):
         self.clear_log_file()
-        self.write_to_the_log_file(f"{self.current_date()} Welcome to the Shell Emulator!")
         print("Welcome to the Shell Emulator!")
         while True:
             command = input(self.prompt())
-            self.write_to_the_log_file(f"{self.username} {self.current_date()} {command}")
+            self.write_to_the_log_file(f"{self.username}, {self.current_date()}, {command}")
             output = self.run_command(command)
             print(output)
             if command.strip() == "exit":
