@@ -1,95 +1,93 @@
 import os
-import sys
-import zipfile
+import tarfile
 import tempfile
 from datetime import datetime
-import win32security
 import configparser
+import logging
+import atexit
+
 
 class ShellEmulator:
-    def init(self):
-        self.load_config("config.ini")
-        self.current_path = self.vfs_path
-
-    def load_config(self, config_path):
-        with open(config_path, 'r') as file:
-            config = configparser.ConfigParser()
-            config.read_file(file)
-            self.username = config['General']['username']
-            self.log_file = config['General']['log_file']
-            self.vfs_zip_path = config['General']['vfs_path']
-            self.start_script=config['General']['start_script']
-
+    def __init__(self):
+        self.config_path = "config.ini"
+        self.load_config()
         self.temp_dir = tempfile.mkdtemp()
-        with zipfile.ZipFile(self.vfs_zip_path, 'r') as zip_ref:
-            zip_ref.extractall(self.temp_dir)
+        self.vfs = {}
+        self.current_path = "/"
+        self.init_logging()
+        self.load_tar_file()
+        atexit.register(self.cleanup)
+    
+    def cleanup(self):
+        if hasattr(self, 'tar_file') and self.tar_file:
+            self.tar_file.close()
 
-        self.vfs_path = self.temp_dir
+    def load_config(self):
+        config = configparser.ConfigParser()
+        config.read(self.config_path)
+        self.username = config["General"]["username"]
+        self.log_file = config["General"]["log_file"]
+        self.vfs_tar_path = config["General"]["vfs_path"]
+        self.start_script = config["General"]["start_script"]
+
+    def init_logging(self):
+        logging.basicConfig(filename=self.log_file, level=logging.INFO, format="%(message)s")
+        self.clear_log_file()
+
+    def clear_log_file(self):
+        open(self.log_file, "w").close()
+
+    def log(self, message):
+        logging.info(message)
+
+    def load_tar_file(self):
+        try:
+            self.tar_file = tarfile.open(self.vfs_tar_path, "r:")
+            self.build_vfs()
+        except Exception as e:
+            print(f"Ошибка открытия tar-архива: {e}")
+            exit(1)
+
+    def build_vfs(self):
+        for member in self.tar_file.getmembers():
+            self.vfs[member.name] = member
+        
+
+    def resolve_path(self, path):
+        """Приводит путь к абсолютному и согласованному с VFS формату."""
+        if path.startswith("/"):
+            abs_path = os.path.normpath(path)
+        else:
+            abs_path = os.path.normpath(os.path.join(self.current_path, path))
+        
+        abs_path = abs_path.replace("\\", "/").lstrip("/")
+        return abs_path
 
     def prompt(self):
         return f"{self.username}:{self.current_path}$ "
 
-    def write_to_the_log_file(self, text):
-        with open(self.log_file, mode='a') as file:
-            try:
-                file.write(text+"\n")
-            except:
-                pass
-
-    def clear_log_file(self):
-        with open(self.log_file, mode='w') as file:
-            file.write('')
-
     def list_directory(self):
-        try:
-            items = os.listdir(self.current_path)
-            result = []
-            for item in items:
-                item_path = os.path.join(self.current_path, item)
-                owner_sid = win32security.GetFileSecurity(item_path, win32security.OWNER_SECURITY_INFORMATION)
-                owner_sid_val = owner_sid.GetSecurityDescriptorOwner()
-                owner_name, domain, _ = win32security.LookupAccountSid(None, owner_sid_val)
-                result.append(f"{item} (owner: {owner_name})")
-            return "\n".join(result)
-        except FileNotFoundError:
-            return "Directory not found."
-        except Exception as e:
-            return str(e)
+        current_dir = self.current_path.strip("/")
+        results = []
+
+        for path in self.vfs:
+            if path.startswith(current_dir) and path != current_dir:
+                sub_path = path[len(current_dir):].strip("/")
+                if "/" not in sub_path:  
+                    item = self.vfs[path]
+                    item_type = "d" if item.isdir() else "-"
+                    results.append(f"{item_type} {item.name.split("/")[-1]} ({oct(item.mode)[-3:]})")
+        
+        return "\n".join(results) if results else "Пусто."
 
     def change_directory(self, path):
-        new_path = os.path.join(self.current_path, path)
-        if os.path.isdir(new_path):
+        """Изменяет текущую директорию, если путь существует в VFS."""
+        new_path = self.resolve_path(path)
+        if new_path in self.vfs and self.vfs[new_path].isdir():
             self.current_path = new_path
-            return f"Changed directory to {new_path}"
+            return f"Перешли в директорию {self.current_path}"
         else:
-            pass
-
-    def remove_directory(self, dirname):
-        path_to_remove = os.path.join(self.current_path, dirname)
-        try:
-            os.rmdir(path_to_remove)
-            return f"Removed directory {dirname}"
-        except OSError as e:
-            return str(e)
-
-    def change_owner(self, filename, new_owner):
-        try:
-            path = os.path.join(self.current_path, filename)
-            new_owner_sid = win32security.LookupAccountName(None, new_owner)[0]
-            security_info = win32security.GetFileSecurity(path, win32security.DACL_SECURITY_INFORMATION)
-            security_info.SetSecurityDescriptorOwner(new_owner_sid, 0)
-            win32security.SetFileSecurity(path, win32security.OWNER_SECURITY_INFORMATION, security_info)
-            return f"Changed owner of {filename} to {new_owner}"
-        except Exception as e:
-
-            return str(e)
-
-    def current_date(self):
-        return datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-
-    def echo(self, text):
-        self.text = text
-        return text
+            return f"Нет такой директории: {path}"
 
     def show_help(self):
         help_text = (
@@ -97,68 +95,77 @@ class ShellEmulator:
             "  ls              - List directory contents\n"
             "  cd <directory>  - Change directory\n"
             "  date            - Show current date and time\n"
-            "  echo            - Print text\n"
+            "  echo <text>     - Print text\n"
             "  chown <file> <new_owner> - Change owner of file\n"
             "  help            - Show this help message\n"
             "  exit            - Exit the shell emulator\n")
         return help_text
 
-    def run_command(self, command):
-        full_text = command
-        parts = command.strip().split()
-        if not parts:
-            return ""
+    def get_date(self):
+        """Возвращает текущую дату и время."""
+        return f"Current date and time: {self.current_date()}"
 
-        cmd = parts[0]
-        if cmd == "ls":
-            self.write_to_the_log_file(f"{self.current_date()} {self.list_directory()}")
-            return self.list_directory()
-        elif cmd == "cd":
-            if len(parts) < 2:
-                self.write_to_the_log_file(f"{self.current_date()} cd: missing argument")
-                return "cd: missing argument"
-            self.write_to_the_log_file(f"{self.current_date()} {self.change_directory(parts[1])}")
-            return self.change_directory(parts[1])
-        elif cmd == "date":
-            self.write_to_the_log_file(f"{self.current_date()} {self.current_date()}")
-            return self.current_date()
-        elif cmd == "help":
-            self.write_to_the_log_file(f"{self.current_date()} {self.show_help()}")
-            return self.show_help()
-        elif cmd == "echo":
-            if len(parts) < 2:
-                self.write_to_the_log_file(f"{self.current_date()} echo: missing text")
-                return "echo: missing text"
-            self.write_to_the_log_file(f"{self.current_date()} {self.echo(full_text[5:])}")
-            return self.echo(full_text[5:])
-        elif cmd == "chown":
-            if len(parts) < 3:
-                self.write_to_the_log_file(f"{self.current_date()} chown: missing arguments")
-                return "chown: missing arguments"
-            filename = parts[1]
-            new_owner = parts[2]
-            self.write_to_the_log_file(f"{self.current_date()} {self.change_owner(filename, new_owner)}")
-            return self.change_owner(filename, new_owner)
-        elif cmd == "exit":
-            self.write_to_the_log_file(f"{self.current_date()} Exiting...")
-            return "Exiting..."
+    def echo(self, text):
+        """Возвращает переданный текст."""
+        return text
+
+    def change_owner(self, filename, new_owner):
+        """Эмулирует изменение владельца файла."""
+        full_path = self.resolve_path(filename)
+        if full_path in self.vfs and self.vfs[full_path].isfile():
+            self.vfs[full_path].uname = new_owner
+            return f"Changed owner of {filename} to {new_owner}"
         else:
-            self.write_to_the_log_file(f"{self.current_date()} {cmd}: command not found")
-            return f"{cmd}: command not found"
+            return f"File not found or is not a file: {filename}"
+
+    def run_command(self, cmd):
+        parts = cmd.strip().split()
+        if not parts:
+            return "Команда не указана."
+        
+
+        command = parts[0]
+        args = parts[1:]
+
+        if command == "cd":
+            if len(args) != 1:
+                return "cd: неверное количество аргументов"
+            return self.change_directory(args[0])
+        elif command == "ls":
+            return self.list_directory()
+        elif command == "date":
+            return self.get_date()
+        elif command == "echo":
+            return self.echo(" ".join(args))
+        elif command == "chown":
+            if len(args) != 2:
+                return "chown: неверное количество аргументов"
+            return self.change_owner(args[0], args[1])
+        elif command == "help":
+            return self.show_help()
+        elif command == "exit":
+            return "Выход из Shell Emulator"
+        else:
+            return f"Неизвестная команда: {command}"
+
 
     def start(self):
-        self.clear_log_file()
-        self.write_to_the_log_file(f"{self.current_date()} Welcome to the Shell Emulator!")
-        print("Welcome to the Shell Emulator!")
+        print("Добро пожаловать в Shell Emulator!")
         while True:
-            command = input(self.prompt())
-            self.write_to_the_log_file(f"{self.username} {self.current_date()} {command}")
-            output = self.run_command(command)
-            print(output)
-            if command.strip() == "exit":
-                break
+            try:
+                command = input(self.prompt())
+                self.log(f"{self.username}, {self.current_date()}, {command}")
+                output = self.run_command(command)
+                print(output)
+                if command.strip() == "exit":
+                    break
+            except Exception as e:
+                print(f"Ошибка: {e}")
+
+    def current_date(self):
+        return datetime.now().strftime("%Y-%m-%d, %H:%M:%S")
+
 
 if __name__ == "__main__":
     emulator = ShellEmulator()
-    emulator.init()
     emulator.start()
